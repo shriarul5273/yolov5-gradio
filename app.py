@@ -5,8 +5,7 @@ from utils.general import (check_img_size, cv2,
 from utils.plots import Annotator, colors
 import numpy as np
 import gradio as gr
-import pandas as pd 
-
+import time
 data = 'data/coco128.yaml' 
 
 
@@ -74,8 +73,9 @@ def detect(im,model,device,iou_threshold=0.45,confidence_threshold=0.25):
         img = img.unsqueeze(0)
 
 # Inference
+    start = time.time()
     pred = model(img, augment=False)
-
+    fps_inference = 1/(time.time()-start)
 # NMS
     pred = non_max_suppression(pred, confidence_threshold, iou_threshold, None, False, max_det=10)
 
@@ -95,7 +95,7 @@ def detect(im,model,device,iou_threshold=0.45,confidence_threshold=0.25):
                 print(xyxy,label)
                 annotator.box_label(xyxy, label, color=colors(c, True))
 
-    return imgs
+    return imgs,fps_inference
 
 
 def inference(img,model_link,iou_threshold,confidence_threshold):
@@ -116,16 +116,17 @@ def inference2(video,model_link,iou_threshold,confidence_threshold):
     fps = frames.get(cv2.CAP_PROP_FPS)
     image_size = (int(frames.get(cv2.CAP_PROP_FRAME_WIDTH)),int(frames.get(cv2.CAP_PROP_FRAME_HEIGHT)))
     finalVideo = cv2.VideoWriter('output.mp4',cv2.VideoWriter_fourcc(*'VP90'), fps, image_size)
-    p = 1
+    fps_video = []
     while frames.isOpened():
         ret,frame = frames.read()
         if not ret:
             break
-        frame = detect(frame,model,device,iou_threshold,confidence_threshold)
+        frame,fps = detect(frame,model,device,iou_threshold,confidence_threshold)
+        fps_video.append(fps)
         finalVideo.write(frame)
     frames.release()
     finalVideo.release()
-    return 'output.mp4'
+    return 'output.mp4',np.mean(fps_video)
 
 
 
@@ -134,18 +135,16 @@ examples_images = ['data/images/bus.jpg',
 examples_videos = ['data/video/input_0.mp4',
                     'data/video/input_1.mp4'] 
 
-models = ['yolov5n','yolov5s','yolov5m','yolov5l','yolov5x']
+models = ['yolov5s','yolov5n','yolov5m','yolov5l','yolov5x']
 
 with gr.Blocks() as demo:
-    csv = pd.read_csv('data/time.csv')
-    csv['id'] = csv['id'] + 1
-    csv.to_csv('data/time.csv',index=False)
     gr.Markdown("## YOLOv5 Inference")
     with gr.Tab("Image"):
         gr.Markdown("## YOLOv5 Inference on Image")
         with gr.Row():
             image_input = gr.Image(type='pil', label="Input Image", source="upload")
             image_output = gr.Image(type='pil', label="Output Image", source="upload")
+        fps_image = gr.Number(value=0,label='FPS')
         image_drop = gr.Dropdown(choices=models,value=models[0])
         image_iou_threshold = gr.Slider(label="IOU Threshold",interactive=True, minimum=0.0, maximum=1.0, value=0.45)
         image_conf_threshold = gr.Slider(label="Confidence Threshold",interactive=True, minimum=0.0, maximum=1.0, value=0.25)
@@ -156,6 +155,7 @@ with gr.Blocks() as demo:
         with gr.Row():
             video_input = gr.Video(type='pil', label="Input Image", source="upload")
             video_output = gr.Video(type="pil", label="Output Image",format="mp4")
+        fps_video = gr.Number(value=0,label='FPS')
         video_drop = gr.Dropdown(choices=models,value=models[0])
         video_iou_threshold = gr.Slider(label="IOU Threshold",interactive=True, minimum=0.0, maximum=1.0, value=0.45)
         video_conf_threshold = gr.Slider(label="Confidence Threshold",interactive=True, minimum=0.0, maximum=1.0, value=0.25)
@@ -168,9 +168,9 @@ with gr.Blocks() as demo:
 
     text_button.click(inference, inputs=[image_input,image_drop,
                                          image_iou_threshold,image_conf_threshold],
-                                        outputs=image_output)
+                                        outputs=[image_output,fps_image])
     video_button.click(inference2, inputs=[video_input,video_drop,
                                            video_iou_threshold,video_conf_threshold],            
-                                        outputs=video_output)
+                                        outputs=[video_output,fps_video])
 
 demo.launch()
